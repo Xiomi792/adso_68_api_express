@@ -3,6 +3,11 @@ const app = express();
 const port = 3000;
 const login = require('./routes/login.cjs');
 const register = require('./routes/register.cjs');
+const cors = require('cors');
+const env = require('dotenv');
+env.config();
+
+app.use(cors());
 
 // recibir datos en formato JSON
 const bodyParser = require('body-parser');
