@@ -1,6 +1,13 @@
+require('dotenv').config();
+
 const express = require('express');
 const app = express();
-const port = 3000;
+const port = Number(process.env.PORT || 3000);
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('PORT must be a valid TCP port between 1 and 65535');
+}
+
 const login = require('./routes/login.cjs');
 const register = require('./routes/register.cjs');
 const {
@@ -15,8 +22,6 @@ const {
   eliminarVenta,
 } = require('./routes/inventario.cjs');
 const cors = require('cors');
-const env = require('dotenv');
-env.config();
 
 app.use(cors());
 
@@ -37,5 +42,5 @@ app.delete('/api/ventas/:id', eliminarVenta);
 app.get('/api/pedidos', listarPedidos);
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`API listening on port ${port}`);
 });
