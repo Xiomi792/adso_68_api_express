@@ -1,4 +1,20 @@
+
 const pool = require('../utils/db.cjs')
+
+// Obtener el siguiente ID disponible
+const obtenerSiguienteId = async (tabla, connection = pool) => {
+  const tablasPermitidas = ['inventario', 'ventas', 'pedidos']
+
+  if (!tablasPermitidas.includes(tabla)) {
+    throw new Error('Nombre de tabla no permitido')
+  }
+
+  const [rows] = await connection.query(
+    `SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM ${tabla}`
+  )
+
+  return Number(rows[0].siguienteId)
+}
 
 const inventarioInicial = [
   { id: 1, nombre: 'Café Espresso', categoria: 'Bebidas', precio: 3500, stock: 18, minimo: 8 },
@@ -10,10 +26,11 @@ const inventarioInicial = [
 
 let inventarioMemoria = inventarioInicial.map((producto) => ({ ...producto }))
 
+// Crear las tablas si todavía no existen
 const asegurarTablas = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS inventario (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id INT PRIMARY KEY,
       nombre VARCHAR(255) NOT NULL,
       categoria VARCHAR(100) DEFAULT 'General',
       precio DECIMAL(10,2) NOT NULL,
@@ -24,7 +41,7 @@ const asegurarTablas = async () => {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS ventas (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id INT PRIMARY KEY,
       cliente VARCHAR(255) NOT NULL DEFAULT 'Cliente',
       metodo_pago VARCHAR(50) NOT NULL DEFAULT 'Efectivo',
       total DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -34,7 +51,7 @@ const asegurarTablas = async () => {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pedidos (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id INT PRIMARY KEY,
       venta_id INT NOT NULL,
       producto_id INT NOT NULL,
       producto_nombre VARCHAR(255) NOT NULL,
@@ -48,17 +65,16 @@ const asegurarTablas = async () => {
   const [filas] = await pool.query('SELECT * FROM inventario ORDER BY id DESC')
 
   if (!filas.length) {
-    await Promise.all(
-      inventarioInicial.map((producto) =>
-        pool.query(
-          'INSERT INTO inventario (nombre, categoria, precio, stock, minimo) VALUES (?, ?, ?, ?, ?)',
-          [producto.nombre, producto.categoria, producto.precio, producto.stock, producto.minimo],
-        ),
-      ),
-    )
+    for (const producto of inventarioInicial) {
+      await pool.query(
+        'INSERT INTO inventario (id, nombre, categoria, precio, stock, minimo) VALUES (?, ?, ?, ?, ?, ?)',
+        [producto.id, producto.nombre, producto.categoria, producto.precio, producto.stock, producto.minimo]
+      )
+    }
   }
 }
 
+// Consultar inventario
 const obtenerInventarioDesdeDb = async () => {
   const [rows] = await pool.query('SELECT * FROM inventario ORDER BY id DESC')
   return rows
@@ -79,6 +95,7 @@ const listarInventario = async (req, res) => {
   }
 }
 
+// Agregar producto
 const agregarProducto = async (req, res) => {
   const { nombre, categoria, precio, stock, minimo } = req.body
 
@@ -105,12 +122,15 @@ const agregarProducto = async (req, res) => {
 
   try {
     await asegurarTablas()
-    const [result] = await pool.query(
-      'INSERT INTO inventario (nombre, categoria, precio, stock, minimo) VALUES (?, ?, ?, ?, ?)',
-      [nuevoProducto.nombre, nuevoProducto.categoria, nuevoProducto.precio, nuevoProducto.stock, nuevoProducto.minimo],
+
+    const nuevoId = await obtenerSiguienteId('inventario')
+
+    await pool.query(
+      'INSERT INTO inventario (id, nombre, categoria, precio, stock, minimo) VALUES (?, ?, ?, ?, ?, ?)',
+      [nuevoId, nuevoProducto.nombre, nuevoProducto.categoria, nuevoProducto.precio, nuevoProducto.stock, nuevoProducto.minimo]
     )
 
-    const [rows] = await pool.query('SELECT * FROM inventario WHERE id = ?', [result.insertId])
+    const [rows] = await pool.query('SELECT * FROM inventario WHERE id = ?', [nuevoId])
     const productoGuardado = rows[0]
 
     inventarioMemoria = [productoGuardado, ...inventarioMemoria]
@@ -125,6 +145,7 @@ const agregarProducto = async (req, res) => {
   }
 }
 
+// Actualizar producto
 const actualizarProducto = async (req, res) => {
   const { id } = req.params
   const { nombre, categoria, precio, stock, minimo } = req.body
@@ -145,9 +166,10 @@ const actualizarProducto = async (req, res) => {
 
   try {
     await asegurarTablas()
+
     const [result] = await pool.query(
       'UPDATE inventario SET nombre = ?, categoria = ?, precio = ?, stock = ?, minimo = ? WHERE id = ?',
-      [nombre.trim(), categoria?.trim() || 'General', Number(precio), Number(stock), Number(minimo), Number(id)],
+      [nombre.trim(), categoria?.trim() || 'General', Number(precio), Number(stock), Number(minimo), Number(id)]
     )
 
     if (!result.affectedRows) {
@@ -156,8 +178,9 @@ const actualizarProducto = async (req, res) => {
 
     const [rows] = await pool.query('SELECT * FROM inventario WHERE id = ?', [id])
     const producto = rows[0]
+
     inventarioMemoria = inventarioMemoria.map((item) =>
-      Number(item.id) === Number(id) ? producto : item,
+      Number(item.id) === Number(id) ? producto : item
     )
 
     return res.json({ message: 'Producto actualizado correctamente', producto })
@@ -167,6 +190,7 @@ const actualizarProducto = async (req, res) => {
   }
 }
 
+// Eliminar producto
 const eliminarProducto = async (req, res) => {
   const { id } = req.params
 
@@ -176,6 +200,7 @@ const eliminarProducto = async (req, res) => {
 
   try {
     await asegurarTablas()
+
     const [result] = await pool.query('DELETE FROM inventario WHERE id = ?', [id])
 
     if (!result.affectedRows) {
@@ -183,6 +208,7 @@ const eliminarProducto = async (req, res) => {
     }
 
     inventarioMemoria = inventarioMemoria.filter((item) => Number(item.id) !== Number(id))
+
     return res.json({ success: true, message: 'Producto eliminado correctamente' })
   } catch (error) {
     console.error(error)
@@ -190,6 +216,7 @@ const eliminarProducto = async (req, res) => {
   }
 }
 
+// Actualizar stock
 const actualizarStock = async (req, res) => {
   const { id, cambio } = req.body
 
@@ -199,9 +226,10 @@ const actualizarStock = async (req, res) => {
 
   try {
     await asegurarTablas()
+
     const [result] = await pool.query(
       'UPDATE inventario SET stock = GREATEST(0, stock + ?) WHERE id = ?',
-      [Number(cambio), Number(id)],
+      [Number(cambio), Number(id)]
     )
 
     if (!result.affectedRows) {
@@ -210,9 +238,11 @@ const actualizarStock = async (req, res) => {
 
     const [rows] = await pool.query('SELECT * FROM inventario WHERE id = ?', [id])
     const producto = rows[0]
+
     inventarioMemoria = inventarioMemoria.map((item) =>
-      Number(item.id) === Number(id) ? producto : item,
+      Number(item.id) === Number(id) ? producto : item
     )
+
     return res.json({ message: 'Stock actualizado', producto })
   } catch (error) {
     console.error(error)
@@ -220,16 +250,21 @@ const actualizarStock = async (req, res) => {
   }
 }
 
+// Listar ventas
 const listarVentas = async (req, res) => {
   try {
     await asegurarTablas()
+
     const [ventas] = await pool.query('SELECT * FROM ventas ORDER BY id DESC')
 
     const ventasDetalladas = await Promise.all(
       ventas.map(async (venta) => {
-        const [items] = await pool.query('SELECT * FROM pedidos WHERE venta_id = ? ORDER BY id DESC', [venta.id])
+        const [items] = await pool.query(
+          'SELECT * FROM pedidos WHERE venta_id = ? ORDER BY id DESC',
+          [venta.id]
+        )
         return { ...venta, items }
-      }),
+      })
     )
 
     return res.json({ message: 'Ventas consultadas correctamente', ventas: ventasDetalladas })
@@ -239,10 +274,13 @@ const listarVentas = async (req, res) => {
   }
 }
 
+// Listar pedidos
 const listarPedidos = async (req, res) => {
   try {
     await asegurarTablas()
+
     const [pedidos] = await pool.query('SELECT * FROM pedidos ORDER BY id DESC')
+
     return res.json({ message: 'Pedidos consultados correctamente', pedidos })
   } catch (error) {
     console.error(error)
@@ -250,6 +288,7 @@ const listarPedidos = async (req, res) => {
   }
 }
 
+// Registrar venta
 const registrarVenta = async (req, res) => {
   const { cliente, metodo_pago, items } = req.body
 
@@ -257,30 +296,36 @@ const registrarVenta = async (req, res) => {
     return res.status(400).json({ message: 'Debes enviar al menos un producto en la venta' })
   }
 
-  const connection = await pool.getConnection()
+  let connection
 
   try {
     await asegurarTablas()
+
+    connection = await pool.getConnection()
     await connection.beginTransaction()
 
-    const totalVenta = 0
+    const ventaId = await obtenerSiguienteId('ventas', connection)
+
     const [ventaResult] = await connection.query(
-      'INSERT INTO ventas (cliente, metodo_pago, total) VALUES (?, ?, ?)',
-      [cliente?.trim() || 'Cliente', metodo_pago?.trim() || 'Efectivo', totalVenta],
+      'INSERT INTO ventas (id, cliente, metodo_pago, total) VALUES (?, ?, ?, ?)',
+      [ventaId, cliente?.trim() || 'Cliente', metodo_pago?.trim() || 'Efectivo', 0]
     )
 
-    const ventaId = ventaResult.insertId
     let total = 0
 
     for (const item of items) {
       const productoId = Number(item.producto_id)
       const cantidad = Number(item.cantidad)
 
-      if (!productoId || cantidad <= 0) {
+      if (!Number.isInteger(productoId) || productoId <= 0 || !Number.isInteger(cantidad) || cantidad <= 0) {
         throw new Error('Cada producto debe tener una cantidad válida')
       }
 
-      const [productoRows] = await connection.query('SELECT * FROM inventario WHERE id = ?', [productoId])
+      const [productoRows] = await connection.query(
+        'SELECT * FROM inventario WHERE id = ?',
+        [productoId]
+      )
+
       const producto = productoRows[0]
 
       if (!producto) {
@@ -294,19 +339,35 @@ const registrarVenta = async (req, res) => {
       const subtotal = Number(producto.precio) * cantidad
       total += subtotal
 
+      const pedidoId = await obtenerSiguienteId('pedidos', connection)
+
       await connection.query(
-        'INSERT INTO pedidos (venta_id, producto_id, producto_nombre, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)',
-        [ventaId, productoId, producto.nombre, cantidad, producto.precio, subtotal],
+        'INSERT INTO pedidos (id, venta_id, producto_id, producto_nombre, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [pedidoId, ventaId, productoId, producto.nombre, cantidad, producto.precio, subtotal]
       )
 
-      await connection.query('UPDATE inventario SET stock = stock - ? WHERE id = ?', [cantidad, productoId])
+      await connection.query(
+        'UPDATE inventario SET stock = stock - ? WHERE id = ?',
+        [cantidad, productoId]
+      )
     }
 
-    await connection.query('UPDATE ventas SET total = ? WHERE id = ?', [total, ventaId])
+    await connection.query(
+      'UPDATE ventas SET total = ? WHERE id = ?',
+      [total, ventaId]
+    )
+
     await connection.commit()
 
-    const [ventaActual] = await connection.query('SELECT * FROM ventas WHERE id = ?', [ventaId])
-    const [pedidosActuales] = await connection.query('SELECT * FROM pedidos WHERE venta_id = ?', [ventaId])
+    const [ventaActual] = await connection.query(
+      'SELECT * FROM ventas WHERE id = ?',
+      [ventaId]
+    )
+
+    const [pedidosActuales] = await connection.query(
+      'SELECT * FROM pedidos WHERE venta_id = ?',
+      [ventaId]
+    )
 
     return res.status(201).json({
       message: 'Venta registrada con éxito',
@@ -314,14 +375,20 @@ const registrarVenta = async (req, res) => {
       pedidos: pedidosActuales,
     })
   } catch (error) {
-    await connection.rollback()
+    if (connection) {
+      await connection.rollback()
+    }
+
     console.error(error)
     return res.status(400).json({ message: error.message || 'Error al registrar la venta' })
   } finally {
-    connection.release()
+    if (connection) {
+      connection.release()
+    }
   }
 }
 
+// Eliminar venta y restaurar stock
 const eliminarVenta = async (req, res) => {
   const { id } = req.params
 
@@ -335,7 +402,11 @@ const eliminarVenta = async (req, res) => {
     connection = await pool.getConnection()
     await connection.beginTransaction()
 
-    const [ventas] = await connection.query('SELECT id FROM ventas WHERE id = ? FOR UPDATE', [id])
+    const [ventas] = await connection.query(
+      'SELECT id FROM ventas WHERE id = ? FOR UPDATE',
+      [id]
+    )
+
     if (!ventas.length) {
       await connection.rollback()
       return res.status(404).json({ message: 'Venta no encontrada' })
@@ -343,17 +414,18 @@ const eliminarVenta = async (req, res) => {
 
     const [items] = await connection.query(
       'SELECT producto_id, cantidad FROM pedidos WHERE venta_id = ?',
-      [id],
+      [id]
     )
 
     for (const item of items) {
       await connection.query(
         'UPDATE inventario SET stock = stock + ? WHERE id = ?',
-        [item.cantidad, item.producto_id],
+        [item.cantidad, item.producto_id]
       )
     }
 
     await connection.query('DELETE FROM ventas WHERE id = ?', [id])
+
     await connection.commit()
 
     return res.json({
@@ -361,11 +433,16 @@ const eliminarVenta = async (req, res) => {
       message: 'Venta y pedidos eliminados; el stock fue restaurado',
     })
   } catch (error) {
-    if (connection) await connection.rollback()
+    if (connection) {
+      await connection.rollback()
+    }
+
     console.error(error)
     return res.status(500).json({ message: 'Error al eliminar la venta' })
   } finally {
-    if (connection) connection.release()
+    if (connection) {
+      connection.release()
+    }
   }
 }
 
@@ -380,3 +457,4 @@ module.exports = {
   registrarVenta,
   eliminarVenta,
 }
+

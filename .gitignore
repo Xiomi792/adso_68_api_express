@@ -1,2 +1,19 @@
-node_modules
+
+node_modules/
 .env
+.env.*
+!.env.example
+
+# Certificados y claves privadas
+*.key
+*.p12
+*.pfx
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Registros
+*.log
+npm-debug.log*
+
